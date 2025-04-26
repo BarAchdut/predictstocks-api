@@ -1,5 +1,3 @@
-# app/prediction_service.py
-
 import random
 from datetime import datetime, timedelta
 from typing import List, Dict

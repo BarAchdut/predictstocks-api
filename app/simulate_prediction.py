@@ -1,5 +1,3 @@
-# app/simulate_prediction.py
-
 from app.models import HistoricalData
 from app.prediction_service import get_predictions_with_social_sentiment
 import random
