@@ -1,29 +1,43 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Depends
 from typing import List
-from app.models import HistoricalData
-from app.prediction_service import get_predictions_with_social_sentiment  # <-- חשוב: קורא לחדש
 
-app = FastAPI()
+from app.models import StockPredictionRequest, StockPrediction
+from app.ai_prediction_service import AIPredictionService
 
-class HistoricalDataInput(BaseModel):
-    date: str
-    price: float
+app = FastAPI(
+    title="Stock Prediction API",
+    description="API for predicting stock prices using social media and AI analysis",
+    version="1.0.0"
+)
 
-class PredictionRequest(BaseModel):
-    symbol: str
-    celebrity_handle: str
-    historical: List[HistoricalDataInput]
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the Stock Prediction API"}
 
-@app.post("/PredictStocks")
-def predict_stocks(request: PredictionRequest):
+@app.post("/predict", response_model=StockPrediction)
+async def predict_stock(request: StockPredictionRequest):
+    """
+    Predict stock price movement based on technical and AI-powered social media analysis.
+    """
+    prediction_service = AIPredictionService()
+    
     try:
-        historical_data = [HistoricalData(h.date, h.price) for h in request.historical]
-        predictions = get_predictions_with_social_sentiment(
-            request.symbol, 
-            historical_data, 
-            request.celebrity_handle
+        result = prediction_service.predict_price_movement(
+            ticker=request.ticker,
+            timeframe=request.timeframe
         )
-        return [p.to_dict() for p in predictions]
+        
+        # If posts were requested but not included in the result
+        if request.include_posts and "posts" not in result:
+            from app.social_media_service import SocialMediaService
+            social_service = SocialMediaService()
+            result["posts"] = social_service.get_posts_for_ticker(request.ticker, limit=20)
+            
+        return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {"status": "ok", "version": "1.0.0"}
