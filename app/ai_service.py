@@ -1,8 +1,11 @@
+# app/ai_service.py
 import os
 import logging
 from typing import Dict, Any, List
+import json
 
 import requests
+import google.generativeai as genai
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -14,12 +17,14 @@ class AIService:
     
     def __init__(self):
         # Load API keys from environment variables
-        self.openai_api_key = os.getenv("OPENAI_API_KEY")
+        self.gemini_api_key = os.getenv("GEMINI_API_KEY")
         self.alternative_api_key = os.getenv("ALTERNATIVE_API_KEY")  # Like HuggingFace, Cohere, etc.
         
-        # Validate API keys
-        if not self.openai_api_key:
-            logger.warning("OpenAI API key not found. Some features may be limited.")
+        # Configure Gemini API
+        if self.gemini_api_key:
+            genai.configure(api_key=self.gemini_api_key)
+        else:
+            logger.warning("Gemini API key not found. Some features may be limited.")
     
     def analyze_social_media_impact(self, posts: List[Dict[str, Any]], ticker: str) -> Dict[str, Any]:
         """
@@ -50,31 +55,59 @@ class AIService:
             Return your analysis in JSON format.
             """
             
-            # Call OpenAI API
-            response = requests.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.openai_api_key}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "gpt-4",  # Or any other model you choose
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.3  # Lower for more consistent responses
+            if not self.gemini_api_key:
+                logger.error("Gemini API key not available")
+                return {
+                    "error": "API key not configured",
+                    "sentiment": "neutral",
+                    "impact": "minimal change",
+                    "confidence": "low"
                 }
-            )
+                
+            # Call Gemini API
+            model = genai.GenerativeModel('gemini-pro')
+            response = model.generate_content(prompt)
             
-            response.raise_for_status()
-            result = response.json()
+            # Parse the response
+            content = response.text
             
-            # Parse the AI response (assuming it returns valid JSON as requested)
-            content = result["choices"][0]["message"]["content"]
-            
-            # You can add code here to process the response if the format doesn't match expectations
+            # Try to extract JSON from the response
+            try:
+                # Check if the response is already valid JSON
+                parsed_content = json.loads(content)
+            except json.JSONDecodeError:
+                # If not, try to extract JSON from the text
+                try:
+                    # Look for content between ```json and ``` markers
+                    import re
+                    json_match = re.search(r'```json\s*([\s\S]*?)\s*```', content)
+                    if json_match:
+                        parsed_content = json.loads(json_match.group(1))
+                    else:
+                        # Try to find anything that looks like JSON
+                        json_match = re.search(r'({[\s\S]*})', content)
+                        if json_match:
+                            parsed_content = json.loads(json_match.group(1))
+                        else:
+                            # If all else fails, create a simple structure with the raw text
+                            parsed_content = {
+                                "raw_response": content,
+                                "sentiment": "neutral",
+                                "impact": "minimal change",
+                                "confidence": "medium"
+                            }
+                except Exception as e:
+                    logger.error(f"Error extracting JSON from response: {e}")
+                    parsed_content = {
+                        "raw_response": content,
+                        "sentiment": "neutral",
+                        "impact": "minimal change",
+                        "confidence": "medium"
+                    }
             
             return {
-                "ai_analysis": content,
-                "raw_response": result
+                "ai_analysis": parsed_content,
+                "raw_response": content
             }
             
         except Exception as e:
@@ -89,6 +122,7 @@ class AIService:
     def fine_tune_model(self, examples: List[Dict[str, Any]]) -> bool:
         """
         Optional: Fine-tune the AI model with stock-specific examples.
+        Note: Gemini does not currently support fine-tuning via API.
         
         Args:
             examples: Training examples with posts and known outcomes
@@ -96,7 +130,45 @@ class AIService:
         Returns:
             Success boolean
         """
-        # Implementation of fine-tuning will be specific to the API you choose
-        # Here would be code to format the data and send it to the API
-        logger.info("Fine-tuning functionality is implemented but not active")
-        return True
+        logger.info("Fine-tuning is not currently supported with Gemini API")
+        return False
+        
+    def get_model_capabilities(self) -> Dict[str, Any]:
+        """
+        Get information about the AI model's capabilities.
+        
+        Returns:
+            Dictionary with model information
+        """
+        try:
+            if not self.gemini_api_key:
+                return {"error": "API key not configured"}
+                
+            # List available models
+            models = genai.list_models()
+            available_models = [
+                {
+                    "name": model.name,
+                    "display_name": model.display_name,
+                    "description": model.description,
+                    "input_token_limit": getattr(model, "input_token_limit", None),
+                    "output_token_limit": getattr(model, "output_token_limit", None),
+                    "supported_generation_methods": getattr(model, "supported_generation_methods", []),
+                }
+                for model in models
+                if "gemini" in model.name.lower()
+            ]
+            
+            return {
+                "available_models": available_models,
+                "current_model": "gemini-pro",
+                "capabilities": [
+                    "text analysis",
+                    "sentiment analysis",
+                    "structured data extraction",
+                    "reasoning"
+                ]
+            }
+        except Exception as e:
+            logger.error(f"Error retrieving model capabilities: {e}")
+            return {"error": str(e)}
