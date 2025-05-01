@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends
 from typing import List
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.models import StockPredictionRequest, StockPrediction
 from app.ai_prediction_service import AIPredictionService
@@ -8,6 +9,19 @@ app = FastAPI(
     title="Stock Prediction API",
     description="API for predicting stock prices using social media and AI analysis",
     version="1.0.0"
+)
+
+origins = [
+    "http://localhost:8080",  
+    "http://localhost:3000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],         
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 @app.get("/")
