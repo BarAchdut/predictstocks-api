@@ -7,6 +7,7 @@ class StockPredictionRequest(BaseModel):
     ticker: str = Field(..., description="Stock ticker symbol (e.g., AAPL)")
     timeframe: str = Field("1d", description="Prediction timeframe: 1d, 1w, 1m")
     include_posts: bool = Field(False, description="Include analyzed posts in response")
+    include_reddit: bool = Field(True, description="Include Reddit posts in response")
     
 class SocialMediaPost(BaseModel):
     """Model for a social media post."""
