@@ -45,7 +45,7 @@ async def predict_stock(request: StockPredictionRequest):
 
         # If posts were requested but not included in the result
         if request.include_posts and "posts" not in result:
-            from app.social_media_service import SocialMediaService
+            from app.social_media import SocialMediaService
             _console.log("Fetching posts for ticker:", request.include_posts)
             social_service = SocialMediaService()
             result["posts"] = social_service.get_posts_for_ticker(request.ticker, limit=20, include_reddit=request.include_reddit)
