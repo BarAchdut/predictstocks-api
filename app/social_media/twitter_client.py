@@ -28,10 +28,15 @@ class TwitterClient:
         """Check if Twitter client is properly configured."""
         return bool(self.bearer_token)
     
-    def get_posts_for_ticker(self, ticker: str, limit: int = 50) -> List[Dict[str, Any]]:
+    def get_posts_for_ticker(self, ticker: str, limit: int = 50, global_start_time: float = None) -> List[Dict[str, Any]]:
         """Get Twitter posts about a specific ticker."""
         if not self.is_configured():
             logger.warning("Twitter API token not found")
+            return []
+        
+        # Check global timeout if provided
+        if global_start_time and time.time() - global_start_time > 180:  # 3 minutes
+            logger.warning(f"Global Twitter timeout reached for ticker {ticker}")
             return []
         
         # Query variants - no cashtag operator for basic API
@@ -45,6 +50,11 @@ class TwitterClient:
         search_url = "https://api.twitter.com/2/tweets/search/recent"
         
         for i, query in enumerate(query_variants):
+            # Check global timeout before each query
+            if global_start_time and time.time() - global_start_time > 180:
+                logger.warning(f"Global Twitter timeout reached during query for ticker {ticker}")
+                break
+                
             try:
                 params = {
                     'query': query,
@@ -54,7 +64,7 @@ class TwitterClient:
                     'max_results': min(limit, 100)  # API limit
                 }
                 
-                result = self._make_request(search_url, params)
+                result = self._make_request(search_url, params, global_start_time)
                 
                 if result and 'data' in result:
                     processed_tweets = self._process_tweets_response(result, query)
@@ -70,15 +80,25 @@ class TwitterClient:
         
         return tweets
     
-    def get_influencer_posts(self, ticker: str, influencers: List[str]) -> List[Dict[str, Any]]:
+    def get_influencer_posts(self, ticker: str, influencers: List[str], global_start_time: float = None) -> List[Dict[str, Any]]:
         """Get posts from specific influencers about a ticker."""
         if not self.is_configured():
+            return []
+        
+        # Check global timeout if provided
+        if global_start_time and time.time() - global_start_time > 180:
+            logger.warning(f"Global Twitter timeout reached for influencer posts for ticker {ticker}")
             return []
         
         posts = []
         search_url = "https://api.twitter.com/2/tweets/search/recent"
         
         for i, influencer in enumerate(influencers):
+            # Check global timeout before each influencer
+            if global_start_time and time.time() - global_start_time > 180:
+                logger.warning(f"Global Twitter timeout reached during influencer fetch for ticker {ticker}")
+                break
+                
             if i > 0:
                 time.sleep(self.request_delay)
             
@@ -91,7 +111,7 @@ class TwitterClient:
                     'max_results': 10
                 }
                 
-                result = self._make_request(search_url, params)
+                result = self._make_request(search_url, params, global_start_time)
                 
                 for tweet in result.get('data', []):
                     posts.append({
@@ -133,9 +153,14 @@ class TwitterClient:
             logger.error(f"❌ Twitter API test failed: {e}")
             return False
     
-    def _make_request(self, url: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _make_request(self, url: str, params: Dict[str, Any], global_start_time: float = None) -> Dict[str, Any]:
         """Make a Twitter API request with retry logic."""
         for attempt in range(self.max_retries):
+            # Check global timeout before each request
+            if global_start_time and time.time() - global_start_time > 180:
+                logger.warning("Global Twitter timeout reached during request")
+                return {}
+                
             try:
                 if attempt > 0:
                     time.sleep(self.request_delay)
@@ -154,6 +179,11 @@ class TwitterClient:
                         retry_after = min(60 * (2 ** attempt), 900)  # Max 15 minutes
                     
                     logger.warning(f"Rate limit exceeded. Waiting {retry_after}s (attempt {attempt + 1}/{self.max_retries})")
+                    
+                    # Check if waiting would exceed global timeout
+                    if global_start_time and time.time() - global_start_time + retry_after > 180:
+                        logger.warning("Rate limit wait would exceed global timeout, skipping")
+                        break
                     
                     if attempt >= 1:  # Give up after 2 rate limit hits
                         logger.warning("Multiple rate limits hit, skipping")

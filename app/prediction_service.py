@@ -1,6 +1,6 @@
-"""Enhanced prediction service with 4-source data collection and graceful fallbacks."""
-
+# prediction_service.py
 import logging
+import time
 from typing import Dict, Any, List
 from datetime import datetime
 
@@ -23,10 +23,6 @@ class PredictionService:
             self.ai_service = AIService()
             self.historical_service = HistoricalDataService()
             
-            # Track platform failures to avoid repeated attempts
-            self.twitter_failed = False
-            self.reddit_failed = False
-            
             logger.info("✅ Enhanced Prediction Service initialized successfully")
             
         except Exception as e:
@@ -44,6 +40,12 @@ class PredictionService:
         """
         logger.info(f"🚀 Starting prediction for {ticker} using available sources")
         start_time = datetime.now()
+        
+        # SET GLOBAL TWITTER TIMEOUT START TIME
+        global_twitter_start = time.time()
+        if self.social_media_service:
+            self.social_media_service.set_global_start_time(global_twitter_start)
+            print(f"[DEBUG] Global Twitter timeout started at {time.strftime('%H:%M:%S', time.localtime(global_twitter_start))}")
         
         # Collect data from all 4 sources
         collected_data = self._collect_all_sources(ticker, timeframe, include_reddit, include_posts)
@@ -75,35 +77,28 @@ class PredictionService:
         except Exception as e:
             logger.warning(f"❌ Historical data failed: {e}")
         
+        # SOURCE 2 & 3: Social Media (Twitter & Reddit) - delegated to SocialMediaService
         if include_posts and self.social_media_service:
-            # SOURCE 2: Twitter
             try:
-                if not self.twitter_failed:
-                    posts = self.social_media_service.get_posts_for_ticker(ticker, limit=25, include_reddit=False)
-                    twitter_posts = [p for p in posts if p.get('platform') == 'twitter']
-                    if twitter_posts:
-                        data["twitter"] = twitter_posts
-                        data["successful_sources"].append("twitter")
-                        logger.info(f"✅ Twitter: {len(twitter_posts)} posts")
+                # Get Twitter posts
+                twitter_posts = self.social_media_service.get_twitter_posts_only(ticker, limit=25)
+                if twitter_posts:
+                    data["twitter"] = twitter_posts
+                    data["successful_sources"].append("twitter")
+                    logger.info(f"✅ Twitter: {len(twitter_posts)} posts")
             except Exception as e:
                 logger.warning(f"❌ Twitter failed: {e}")
-                if "rate limit" in str(e).lower() or "429" in str(e):
-                    self.twitter_failed = True
             
-            # SOURCE 3: Reddit
+            # Get Reddit posts
             if include_reddit:
                 try:
-                    if not self.reddit_failed:
-                        posts = self.social_media_service.get_posts_for_ticker(ticker, limit=25, include_reddit=True)
-                        reddit_posts = [p for p in posts if p.get('platform') == 'reddit']
-                        if reddit_posts:
-                            data["reddit"] = reddit_posts
-                            data["successful_sources"].append("reddit")
-                            logger.info(f"✅ Reddit: {len(reddit_posts)} posts")
+                    reddit_posts = self.social_media_service.get_reddit_posts_only(ticker, limit=25)
+                    if reddit_posts:
+                        data["reddit"] = reddit_posts
+                        data["successful_sources"].append("reddit")
+                        logger.info(f"✅ Reddit: {len(reddit_posts)} posts")
                 except Exception as e:
                     logger.warning(f"❌ Reddit failed: {e}")
-                    if "403" in str(e):
-                        self.reddit_failed = True
         
         # SOURCE 4: AI Analysis (analyze collected data)
         try:
@@ -202,17 +197,27 @@ class PredictionService:
     
     def get_service_status(self) -> Dict[str, Any]:
         """Get service status for monitoring."""
+        if not self.social_media_service:
+            return {
+                "overall_status": "error",
+                "twitter_available": False,
+                "reddit_available": False,
+                "can_analyze": False
+            }
+        
+        platform_status = self.social_media_service.get_platform_status()
+        
         return {
-            "overall_status": "operational" if not (self.twitter_failed and self.reddit_failed) else "degraded",
-            "twitter_available": not self.twitter_failed,
-            "reddit_available": not self.reddit_failed,
+            "overall_status": "operational" if (platform_status["twitter"]["operational"] or platform_status["reddit"]["operational"]) else "degraded",
+            "twitter_available": platform_status["twitter"]["operational"],
+            "reddit_available": platform_status["reddit"]["operational"],
             "can_analyze": True
         }
     
     def reset_failures(self):
         """Reset failure flags after cooldown period."""
-        self.twitter_failed = False
-        self.reddit_failed = False
+        if self.social_media_service:
+            self.social_media_service.reset_platform_status()
         logger.info("🔄 Platform failure flags reset")
     
     def get_available_tickers(self) -> Dict[str, Any]:
