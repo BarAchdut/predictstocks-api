@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import time
 from typing import Dict, Any, List
 
 logger = logging.getLogger(__name__)
@@ -11,23 +12,23 @@ class SentimentAnalyzer:
     """Handles sentiment analysis and response processing."""
     
     def __init__(self):
+        print("[DEBUG] Initializing SentimentAnalyzer...")
+        start_time = time.time()
+        
         self.valid_sentiments = ["very negative", "negative", "neutral", "positive", "very positive"]
         self.valid_impacts = ["significant decrease", "moderate decrease", "minimal change", 
                              "moderate increase", "significant increase"]
         self.valid_confidences = ["low", "medium", "high"]
+        
+        init_time = time.time() - start_time
+        print(f"[DEBUG] SentimentAnalyzer initialized in {init_time:.3f} seconds")
     
     def create_analysis_prompt(self, posts: List[Dict[str, Any]], ticker: str) -> Dict[str, str]:
-        """
-        Create a structured prompt for sentiment analysis.
+        """Create structured prompt for sentiment analysis."""
+        print(f"[DEBUG] Creating analysis prompt for {ticker} with {len(posts)} posts")
         
-        Args:
-            posts: List of social media posts
-            ticker: Stock ticker symbol
-            
-        Returns:
-            Dictionary with system message and user prompt
-        """
         if not posts:
+            print("[DEBUG] No posts available for analysis - returning neutral prompt")
             return {
                 "system_message": "You are a financial analyst AI.",
                 "user_prompt": f"No posts available for analysis of {ticker}. Provide neutral analysis."
@@ -36,7 +37,7 @@ class SentimentAnalyzer:
         # Format posts for analysis (limit to avoid token limits)
         formatted_posts = "\n".join([
             f"Post by {post.get('author', 'Unknown')} ({post.get('platform', 'unknown')}): {post.get('text', '')[:500]}" 
-            for post in posts[:15]  # Limit to 15 posts to avoid token limits
+            for post in posts[:15]  # Limit to 15 posts
         ])
         
         system_message = (
@@ -66,53 +67,62 @@ class SentimentAnalyzer:
         }}
         """
         
+        print(f"[DEBUG] Analysis prompt created, length: {len(user_prompt)} characters")
+        
         return {
             "system_message": system_message,
             "user_prompt": user_prompt
         }
     
     def parse_ai_response(self, raw_response: str) -> Dict[str, Any]:
-        """
-        Parse and validate AI response into structured format.
+        """Parse and validate AI response into structured format."""
+        print("[DEBUG] Parsing AI response...")
+        print(f"[DEBUG] Raw response length: {len(raw_response)} characters")
         
-        Args:
-            raw_response: Raw text response from AI
-            
-        Returns:
-            Structured and validated analysis result
-        """
         try:
             # Try direct JSON parsing first
             parsed_content = json.loads(raw_response)
+            print(f"[DEBUG] Successfully parsed JSON response")
             logger.debug("Successfully parsed JSON response")
             
         except json.JSONDecodeError:
-            # Try to extract JSON from markdown code blocks
+            print("[DEBUG] Direct JSON parsing failed, trying extraction methods...")
             try:
+                # Try to extract JSON from markdown code blocks
                 json_match = re.search(r'```json\s*([\s\S]*?)\s*```', raw_response)
                 if json_match:
                     parsed_content = json.loads(json_match.group(1))
-                    logger.debug("Extracted JSON from markdown block")
+                    print(f"[DEBUG] Extracted JSON from markdown block")
                 else:
                     # Try to find JSON object in the response
                     json_match = re.search(r'({[\s\S]*})', raw_response)
                     if json_match:
                         parsed_content = json.loads(json_match.group(1))
-                        logger.debug("Extracted JSON from response text")
+                        print(f"[DEBUG] Extracted JSON from response text")
                     else:
                         # Fallback: create structured response from unstructured content
+                        print("[DEBUG] JSON extraction failed, using unstructured parsing fallback")
                         parsed_content = self._parse_unstructured_response(raw_response)
-                        logger.debug("Used unstructured parsing fallback")
                         
             except Exception as e:
+                print(f"[DEBUG] Error extracting JSON from response: {e}")
                 logger.error(f"Error extracting JSON from response: {e}")
                 parsed_content = self._parse_unstructured_response(raw_response)
         
         # Validate and normalize the response
-        return self._validate_and_normalize_response(parsed_content)
+        validated_response = self._validate_and_normalize_response(parsed_content)
+        
+        print(f"[DEBUG] AI response parsing completed")
+        print(f"[DEBUG] Parsed sentiment: {validated_response.get('sentiment')}")
+        print(f"[DEBUG] Parsed impact: {validated_response.get('impact')}")
+        print(f"[DEBUG] Parsed confidence: {validated_response.get('confidence')}")
+        
+        return validated_response
     
     def _parse_unstructured_response(self, content: str) -> Dict[str, Any]:
         """Parse unstructured AI response into structured format."""
+        print("[DEBUG] Parsing unstructured response...")
+        
         result = {
             "sentiment": "neutral",
             "impact": "minimal change", 
@@ -154,6 +164,7 @@ class SentimentAnalyzer:
     
     def _validate_and_normalize_response(self, response: Dict[str, Any]) -> Dict[str, Any]:
         """Validate and normalize AI response to ensure consistency."""
+        print("[DEBUG] Validating and normalizing response...")
         
         # Normalize sentiment
         sentiment = str(response.get("sentiment", "neutral")).lower()
@@ -188,18 +199,32 @@ class SentimentAnalyzer:
         if confidence not in self.valid_confidences:
             confidence = "medium"
         
-        return {
+        # Validate other fields
+        key_factors = response.get("key_factors", [])
+        patterns = response.get("patterns", [])
+        reasoning = response.get("reasoning", "Analysis completed")
+        
+        if not isinstance(key_factors, list):
+            key_factors = []
+        if not isinstance(patterns, list):
+            patterns = []
+        
+        validated_response = {
             "sentiment": sentiment,
             "impact": impact,
             "confidence": confidence,
-            "key_factors": response.get("key_factors", []),
-            "patterns": response.get("patterns", []),
-            "reasoning": response.get("reasoning", "Analysis completed")
+            "key_factors": key_factors,
+            "patterns": patterns,
+            "reasoning": reasoning
         }
+        
+        return validated_response
     
     def create_fallback_analysis(self, error_message: str) -> Dict[str, Any]:
         """Create a fallback analysis when errors occur."""
-        return {
+        print(f"[DEBUG] Creating fallback analysis for error: {error_message}")
+        
+        fallback_analysis = {
             "sentiment": "neutral",
             "impact": "minimal change",
             "confidence": "low",
@@ -207,3 +232,5 @@ class SentimentAnalyzer:
             "patterns": [],
             "reasoning": f"Error occurred during analysis: {error_message}"
         }
+        
+        return fallback_analysis

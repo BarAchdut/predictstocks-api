@@ -1,12 +1,12 @@
-"""OpenAI client for AI-powered text analysis."""
+"""OpenAI client with retry logic and error handling."""
 
 import os
 import logging
+import time
 from typing import Dict, Any
 
 from dotenv import load_dotenv
 
-# Updated OpenAI import for version 1.0+
 try:
     from openai import OpenAI
 except ImportError:
@@ -18,7 +18,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 class OpenAIClient:
-    """Client for OpenAI API interactions."""
+    """Client for OpenAI API with robust error handling."""
     
     def __init__(self):
         self.api_key = os.getenv("OPENAI_API_KEY")
@@ -26,56 +26,53 @@ class OpenAIClient:
             logger.error("OPENAI_API_KEY not found in environment variables")
             raise ValueError("OpenAI API key is required")
         
-        # Initialize OpenAI client (new syntax for v1.0+)
         self.client = OpenAI(api_key=self.api_key)
-        self.model = 'gpt-4o-mini'  # Current recommended model
+        self.model = 'gpt-4o-mini'
         self.max_tokens = 1000
         self.temperature = 0.3
+        self.max_retries = 2
+        self.retry_delay = 1.0
     
     def is_configured(self) -> bool:
         """Check if OpenAI client is properly configured."""
         return bool(self.api_key)
     
     def analyze_text(self, prompt: str, system_message: str = None) -> str:
-        """
-        Send a text analysis request to OpenAI.
-        
-        Args:
-            prompt: The user prompt to analyze
-            system_message: Optional system message for context
-            
-        Returns:
-            Raw response content from OpenAI
-        """
-        try:
-            messages = []
-            
-            if system_message:
-                messages.append({"role": "system", "content": system_message})
-            
-            messages.append({"role": "user", "content": prompt})
-            
-            # Use new OpenAI client syntax
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=self.temperature,  
-                max_tokens=self.max_tokens
-            )
-            
-            content = response.choices[0].message.content.strip()
-            logger.debug(f"OpenAI response received: {len(content)} characters")
-            
-            return content
-            
-        except Exception as e:
-            logger.error(f"Error in OpenAI API call: {e}")
-            raise
+        """Send analysis request to OpenAI with retry logic."""
+        for attempt in range(self.max_retries):
+            try:
+                messages = []
+                
+                if system_message:
+                    messages.append({"role": "system", "content": system_message})
+                
+                messages.append({"role": "user", "content": prompt})
+                
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=self.temperature,  
+                    max_tokens=self.max_tokens
+                )
+                
+                content = response.choices[0].message.content.strip()
+                logger.debug(f"OpenAI response received: {len(content)} characters")
+                
+                return content
+                
+            except Exception as e:
+                logger.warning(f"OpenAI attempt {attempt + 1} failed: {e}")
+                
+                if attempt < self.max_retries - 1:
+                    wait_time = self.retry_delay * (2 ** attempt)
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"OpenAI failed after {self.max_retries} attempts: {e}")
+                    raise
     
     def test_connection(self) -> Dict[str, Any]:
         """Test the OpenAI API connection."""
         try:
-            # Make a simple test request
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[

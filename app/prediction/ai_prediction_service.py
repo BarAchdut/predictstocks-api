@@ -193,25 +193,38 @@ class AIPredictionService(PredictionService):
         except:
             return False
 
-    def _create_error_response(self, ticker: str, timeframe: str, error_message: str) -> Dict[str, Any]:
-        """Create error response with fallback values."""
-        return {
-            "ticker": ticker,
-            "prediction_time": datetime.now().isoformat(),
-            "timeframe": timeframe,
-            "error": error_message,
-            "prediction": {
-                "direction": "hold",
-                "expected_impact": "minimal change",
-                "technical_trend": "neutral",
-                "sentiment": "neutral"
-            },
+def _create_error_response(self, ticker: str, timeframe: str, error_message: str) -> Dict[str, Any]:
+    return {
+        "ticker": ticker,
+        "prediction_time": datetime.now(),
+        "timeframe": timeframe,
+        "prediction": {
+            "direction": "neutral",
+            "sentiment": "neutral",
             "confidence": 0.1,
-            "supporting_data": {
-                "error_occurred": True,
-                "error_details": error_message
-            }
-        }
+            "reasoning": f"Fallback response due to error: {error_message}"
+        },
+        "technical_signals": {
+            "trend": "neutral",
+            "latest_price": 0.0,
+            "price_change": 0.0,
+            "price_change_percent": 0.0
+        },
+        "sentiment_analysis": {
+            "sentiment": "neutral",
+            "impact": "low",
+            "confidence": "low",
+            "key_factors": [],
+            "patterns": [],
+            "reasoning": "No social media data available"
+        },
+        "confidence": 0.1,
+        "supporting_data": {
+            "error_occurred": True,
+            "error_details": error_message
+        },
+        "posts": []
+    }
 
     def get_service_status(self) -> Dict[str, Any]:
         """Get status of all underlying services."""

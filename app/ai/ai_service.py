@@ -1,4 +1,4 @@
-"""Main AI service for social media sentiment analysis."""
+"""Main AI service for social media sentiment analysis with fallback handling."""
 
 import logging
 from typing import Dict, Any, List
@@ -9,28 +9,28 @@ from .sentiment_analyzer import SentimentAnalyzer
 logger = logging.getLogger(__name__)
 
 class AIService:
-    """Service for interacting with external AI APIs for sentiment and impact analysis."""
+    """Service for AI analysis with robust error handling."""
 
     def __init__(self):
-        self.openai_client = OpenAIClient()
-        self.sentiment_analyzer = SentimentAnalyzer()
+        try:
+            self.openai_client = OpenAIClient()
+            self.sentiment_analyzer = SentimentAnalyzer()
+            logger.info("✅ AI Service initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ AI Service initialization failed: {e}")
+            self.openai_client = None
+            self.sentiment_analyzer = SentimentAnalyzer()
 
     def analyze_social_media_impact(self, posts: List[Dict[str, Any]], ticker: str) -> Dict[str, Any]:
-        """Analyze social media posts for sentiment and potential stock impact."""
+        """Analyze social media posts with fallback for failures."""
         try:
             if not posts:
                 logger.warning(f"No posts provided for analysis of {ticker}")
-                return {
-                    "ai_analysis": {
-                        "sentiment": "neutral",
-                        "impact": "minimal change",
-                        "confidence": "low",
-                        "key_factors": ["No posts available for analysis"]
-                    },
-                    "raw_response": "No posts to analyze",
-                    "posts_analyzed": 0,
-                    "posts_shown_to_ai": 0
-                }
+                return self._create_fallback_response("No posts available", 0)
+
+            if not self.openai_client:
+                logger.warning("OpenAI client not available, using fallback analysis")
+                return self._create_fallback_response("OpenAI service unavailable", len(posts))
 
             # Create analysis prompt
             prompt_data = self.sentiment_analyzer.create_analysis_prompt(posts, ticker)
@@ -55,29 +55,43 @@ class AIService:
 
         except Exception as e:
             logger.error(f"Error analyzing social media posts: {e}")
-            
-            fallback_analysis = self.sentiment_analyzer.create_fallback_analysis(str(e))
-            
-            return {
-                "error": str(e),
-                "ai_analysis": fallback_analysis,
-                "posts_analyzed": len(posts) if posts else 0,
-                "posts_shown_to_ai": 0
-            }
+            return self._create_fallback_response(str(e), len(posts) if posts else 0)
 
-    def fine_tune_model(self, examples: List[Dict[str, Any]]) -> bool:
-        """Fine-tuning method (placeholder for future implementation)."""
-        logger.info("Fine-tuning is not implemented in this version")
-        return False
-
-    def get_model_capabilities(self) -> Dict[str, Any]:
-        """Get information about available models and capabilities."""
-        return self.openai_client.get_model_capabilities()
+    def _create_fallback_response(self, error_reason: str, posts_count: int) -> Dict[str, Any]:
+        """Create fallback response when AI analysis fails."""
+        fallback_analysis = {
+            "sentiment": "neutral",
+            "impact": "minimal change",
+            "confidence": "low",
+            "key_factors": ["AI analysis unavailable"],
+            "patterns": [],
+            "reasoning": f"Fallback analysis: {error_reason}"
+        }
+        
+        return {
+            "ai_analysis": fallback_analysis,
+            "error": error_reason,
+            "posts_analyzed": posts_count,
+            "posts_shown_to_ai": 0
+        }
 
     def test_connection(self) -> Dict[str, Any]:
-        """Test the OpenAI API connection."""
+        """Test AI service connection."""
+        if not self.openai_client:
+            return {
+                "status": "error",
+                "message": "OpenAI client not initialized"
+            }
+        
         return self.openai_client.test_connection()
     
     def is_configured(self) -> bool:
         """Check if AI service is properly configured."""
-        return self.openai_client.is_configured()
+        return self.openai_client is not None and self.openai_client.is_configured()
+
+    def get_model_capabilities(self) -> Dict[str, Any]:
+        """Get information about AI capabilities."""
+        if not self.openai_client:
+            return {"status": "unavailable"}
+        
+        return self.openai_client.get_model_capabilities()

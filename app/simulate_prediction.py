@@ -42,13 +42,7 @@ class StockPredictionSimulator:
     def run_comprehensive_simulation(self, ticker: str, timeframes: List[str] = None) -> Dict[str, Any]:
         """
         Run comprehensive simulation for a stock ticker.
-        
-        Args:
-            ticker: Stock ticker symbol (e.g., 'AAPL')
-            timeframes: List of timeframes to test (default: ['1d', '1w', '1m'])
-            
-        Returns:
-            Dictionary with complete simulation results
+        Tests the 4-source prediction system with graceful fallbacks.
         """
         if timeframes is None:
             timeframes = ['1d', '1w', '1m']
@@ -65,8 +59,12 @@ class StockPredictionSimulator:
             "simulation_start": datetime.now().isoformat(),
             "service_status": service_status,
             "predictions": {},
-            "data_summary": {},
-            "performance_metrics": {}
+            "source_performance": {  # Track which sources worked
+                "historical": {"attempts": 0, "successes": 0},
+                "twitter": {"attempts": 0, "successes": 0},
+                "reddit": {"attempts": 0, "successes": 0},
+                "ai_analysis": {"attempts": 0, "successes": 0}
+            }
         }
         
         # Run predictions for each timeframe
@@ -74,12 +72,15 @@ class StockPredictionSimulator:
             logger.info(f"📊 Testing {timeframe} prediction for {ticker}")
             
             try:
-                # Get prediction
+                # Get prediction using 4-source system
                 prediction_result = self.prediction_service.predict_price_movement(
                     ticker=ticker,
                     timeframe=timeframe,
                     include_reddit=True
                 )
+                
+                # Track which sources were successful
+                self._update_source_performance(prediction_result, simulation_results["source_performance"])
                 
                 # Analyze prediction quality
                 prediction_analysis = self._analyze_prediction_quality(prediction_result)
@@ -89,7 +90,12 @@ class StockPredictionSimulator:
                     "analysis": prediction_analysis
                 }
                 
-                logger.info(f"✅ {timeframe} prediction completed - Direction: {prediction_result.get('prediction', {}).get('direction', 'unknown')}")
+                # Log results
+                direction = prediction_result.get('prediction', {}).get('direction', 'unknown')
+                confidence = prediction_result.get('prediction', {}).get('confidence', 0)
+                sources_used = len(prediction_result.get('supporting_data', {}).get('sources_used', []))
+                
+                logger.info(f"✅ {timeframe} prediction: {direction} (confidence: {confidence:.2f}, sources: {sources_used})")
                 
             except Exception as e:
                 logger.error(f"❌ Error in {timeframe} prediction: {e}")
@@ -105,15 +111,7 @@ class StockPredictionSimulator:
         return simulation_results
     
     def run_social_media_analysis_test(self, ticker: str) -> Dict[str, Any]:
-        """
-        Test social media analysis capabilities.
-        
-        Args:
-            ticker: Stock ticker symbol
-            
-        Returns:
-            Social media analysis results
-        """
+        """Test social media analysis capabilities separately."""
         logger.info(f"📱 Testing social media analysis for {ticker}")
         
         results = {
@@ -172,80 +170,6 @@ class StockPredictionSimulator:
         results["test_end"] = datetime.now().isoformat()
         return results
     
-    def compare_predictions_with_actual(self, ticker: str, days_back: int = 5) -> Dict[str, Any]:
-        """
-        Compare predictions with actual price movements (historical analysis).
-        
-        Args:
-            ticker: Stock ticker symbol
-            days_back: How many days back to analyze
-            
-        Returns:
-            Comparison results
-        """
-        logger.info(f"📈 Comparing predictions with actual data for {ticker}")
-        
-        results = {
-            "ticker": ticker,
-            "analysis_period": f"{days_back} days",
-            "comparisons": []
-        }
-        
-        try:
-            # Get historical data
-            historical_data = self.historical_service.get_historical_data(ticker, days=days_back + 5)
-            
-            if len(historical_data) < days_back + 2:
-                return {
-                    "error": "Insufficient historical data for comparison",
-                    "status": "insufficient_data"
-                }
-            
-            # Simulate predictions for each day
-            for i in range(days_back):
-                test_date = datetime.now() - timedelta(days=days_back - i)
-                
-                # Get prediction (simulated as if we were predicting on that day)
-                prediction = self.prediction_service.predict_price_movement(ticker, "1d")
-                
-                # Get actual price movement
-                if i < len(historical_data) - 1:
-                    actual_change = historical_data[i+1]["close"] - historical_data[i]["close"]
-                    actual_direction = "up" if actual_change > 0 else "down" if actual_change < 0 else "neutral"
-                    
-                    predicted_direction = prediction.get("prediction", {}).get("direction", "hold")
-                    
-                    # Compare
-                    comparison = {
-                        "date": test_date.strftime("%Y-%m-%d"),
-                        "predicted_direction": predicted_direction,
-                        "actual_direction": actual_direction,
-                        "actual_change": round(actual_change, 2),
-                        "prediction_confidence": prediction.get("confidence", 0),
-                        "match": self._directions_match(predicted_direction, actual_direction)
-                    }
-                    
-                    results["comparisons"].append(comparison)
-            
-            # Calculate accuracy
-            matches = sum(1 for comp in results["comparisons"] if comp["match"])
-            total = len(results["comparisons"])
-            accuracy = (matches / total * 100) if total > 0 else 0
-            
-            results["accuracy_summary"] = {
-                "total_predictions": total,
-                "correct_predictions": matches,
-                "accuracy_percentage": round(accuracy, 1)
-            }
-            
-            logger.info(f"✅ Historical analysis completed - Accuracy: {accuracy:.1f}%")
-            
-        except Exception as e:
-            logger.error(f"❌ Error in historical comparison: {e}")
-            results["error"] = str(e)
-        
-        return results
-    
     def _check_service_status(self) -> Dict[str, Any]:
         """Check status of all services."""
         logger.info("🔍 Checking service status...")
@@ -301,6 +225,17 @@ class StockPredictionSimulator:
         
         return status
     
+    def _update_source_performance(self, prediction_result: Dict[str, Any], performance_tracker: Dict[str, Dict]) -> None:
+        """Track which data sources were successful."""
+        sources_used = prediction_result.get("supporting_data", {}).get("sources_used", [])
+        
+        # Count attempts and successes for each source
+        all_sources = ["historical", "twitter", "reddit", "ai_analysis"]
+        for source in all_sources:
+            performance_tracker[source]["attempts"] += 1
+            if source in sources_used:
+                performance_tracker[source]["successes"] += 1
+    
     def _analyze_prediction_quality(self, prediction_result: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze the quality of a prediction result."""
         analysis = {
@@ -312,13 +247,13 @@ class StockPredictionSimulator:
         
         try:
             # Check if prediction was successful
-            if "error" in prediction_result:
-                analysis["status"] = "error"
-                analysis["issues"].append(f"Prediction failed: {prediction_result['error']}")
+            if not prediction_result.get("success", False):
+                analysis["status"] = "failed"
+                analysis["issues"].append("Prediction process failed")
                 return analysis
             
             # Analyze confidence level
-            confidence = prediction_result.get("confidence", 0)
+            confidence = prediction_result.get("prediction", {}).get("confidence", 0)
             if confidence >= 0.7:
                 analysis["strengths"].append(f"High confidence ({confidence:.2f})")
                 analysis["quality_score"] += 30
@@ -329,32 +264,36 @@ class StockPredictionSimulator:
                 analysis["issues"].append(f"Low confidence ({confidence:.2f})")
                 analysis["quality_score"] += 10
             
-            # Analyze data quality
-            supporting_data = prediction_result.get("supporting_data", {})
-            posts_count = supporting_data.get("total_posts_analyzed", 0)
+            # Analyze data sources used
+            sources_used = prediction_result.get("supporting_data", {}).get("sources_used", [])
+            sources_count = len(sources_used)
             
-            if posts_count >= 20:
-                analysis["strengths"].append(f"Good data volume ({posts_count} posts)")
-                analysis["quality_score"] += 25
-            elif posts_count >= 10:
-                analysis["strengths"].append(f"Moderate data volume ({posts_count} posts)")
+            if sources_count >= 4:
+                analysis["strengths"].append(f"Excellent source coverage ({sources_count}/4 sources)")
+                analysis["quality_score"] += 30
+            elif sources_count >= 3:
+                analysis["strengths"].append(f"Good source coverage ({sources_count}/4 sources)")
+                analysis["quality_score"] += 20
+            elif sources_count >= 2:
+                analysis["strengths"].append(f"Moderate source coverage ({sources_count}/4 sources)")
                 analysis["quality_score"] += 15
             else:
-                analysis["issues"].append(f"Limited data volume ({posts_count} posts)")
+                analysis["issues"].append(f"Limited source coverage ({sources_count}/4 sources)")
                 analysis["quality_score"] += 5
             
-            # Analyze signal alignment
-            prediction_data = prediction_result.get("prediction", {})
-            alignment = prediction_data.get("signal_alignment", "unknown")
+            # Analyze data volume
+            supporting_data = prediction_result.get("supporting_data", {})
+            posts_count = supporting_data.get("total_posts_analyzed", 0)
+            historical_count = supporting_data.get("historical_data_points", 0)
             
-            if alignment in ["strong_alignment", "good_alignment"]:
-                analysis["strengths"].append(f"Good signal alignment ({alignment})")
-                analysis["quality_score"] += 25
-            elif alignment == "mixed":
-                analysis["issues"].append("Mixed signals")
-                analysis["quality_score"] += 10
-            elif alignment == "conflicting":
-                analysis["issues"].append("Conflicting signals")
+            if posts_count >= 20 or historical_count >= 20:
+                analysis["strengths"].append(f"Good data volume (posts: {posts_count}, historical: {historical_count})")
+                analysis["quality_score"] += 20
+            elif posts_count >= 10 or historical_count >= 10:
+                analysis["strengths"].append(f"Moderate data volume (posts: {posts_count}, historical: {historical_count})")
+                analysis["quality_score"] += 15
+            else:
+                analysis["issues"].append(f"Limited data volume (posts: {posts_count}, historical: {historical_count})")
                 analysis["quality_score"] += 5
             
             # Final quality assessment
@@ -382,12 +321,6 @@ class StockPredictionSimulator:
             "key_factors": ", ".join(ai_result.get("key_factors", [])[:3])
         }
     
-    def _directions_match(self, predicted: str, actual: str) -> bool:
-        """Check if predicted direction matches actual direction."""
-        # Simplify predictions to basic directions
-        pred_simple = "up" if predicted in ["buy", "strong_buy"] else "down" if predicted in ["sell", "strong_sell"] else "neutral"
-        return pred_simple == actual
-    
     def _generate_simulation_summary(self, results: Dict[str, Any]) -> Dict[str, Any]:
         """Generate overall summary of simulation results."""
         summary = {
@@ -395,6 +328,7 @@ class StockPredictionSimulator:
             "successful_predictions": 0,
             "failed_predictions": 0,
             "average_confidence": 0,
+            "source_reliability": {},
             "recommendations": []
         }
         
@@ -403,7 +337,7 @@ class StockPredictionSimulator:
         for timeframe, prediction_data in results["predictions"].items():
             if "error" not in prediction_data:
                 summary["successful_predictions"] += 1
-                confidence = prediction_data["prediction"].get("confidence", 0)
+                confidence = prediction_data["prediction"].get("prediction", {}).get("confidence", 0)
                 confidences.append(confidence)
             else:
                 summary["failed_predictions"] += 1
@@ -411,13 +345,24 @@ class StockPredictionSimulator:
         if confidences:
             summary["average_confidence"] = round(sum(confidences) / len(confidences), 2)
         
+        # Calculate source reliability
+        source_performance = results.get("source_performance", {})
+        for source, perf_data in source_performance.items():
+            if perf_data["attempts"] > 0:
+                reliability = (perf_data["successes"] / perf_data["attempts"]) * 100
+                summary["source_reliability"][source] = round(reliability, 1)
+        
         # Generate recommendations
         if summary["successful_predictions"] == 0:
-            summary["recommendations"].append("Check API credentials and service configuration")
-        elif summary["average_confidence"] < 0.5:
-            summary["recommendations"].append("Consider gathering more data sources for better confidence")
+            summary["recommendations"].append("All predictions failed - check service configuration and API credentials")
+        elif summary["average_confidence"] < 0.3:
+            summary["recommendations"].append("Very low confidence - investigate data quality and source availability")
+        elif summary["source_reliability"].get("twitter", 0) < 50:
+            summary["recommendations"].append("Twitter reliability low - check rate limits and API configuration")
+        elif summary["source_reliability"].get("reddit", 0) < 50:
+            summary["recommendations"].append("Reddit reliability low - check API credentials and access permissions")
         else:
-            summary["recommendations"].append("Prediction system is functioning well")
+            summary["recommendations"].append("Prediction system functioning well with good source diversity")
         
         return summary
 
@@ -444,6 +389,11 @@ def main():
             summary = simulation_results["summary"]
             print(f"✅ Successful predictions: {summary['successful_predictions']}/{summary['total_timeframes_tested']}")
             print(f"📈 Average confidence: {summary['average_confidence']:.2f}")
+            
+            # Print source reliability
+            print(f"🔧 Source reliability:")
+            for source, reliability in summary["source_reliability"].items():
+                print(f"   {source}: {reliability}%")
             
             # Test social media analysis
             print(f"\n📱 Testing social media analysis for {ticker}...")
